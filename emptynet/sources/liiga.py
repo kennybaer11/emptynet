@@ -10,6 +10,10 @@ same object is when that team took its timeout, which is usually the same
 whistle the goalie left at.
 
 Season numbers are the year the season ends: 2025 is 2024-25.
+
+Liiga numbers its games from 1 again every season, so the id is qualified with
+the season before it is stored - game 10 of 2024-25 and game 10 of 2025-26 are
+different games and must not share a key.
 """
 
 import logging
@@ -47,7 +51,8 @@ def season_games(start_year: int, stages=("regular", "playoffs")) -> list[dict]:
             if not g.get("ended"):
                 continue
             games.append({
-                "game_id": str(g["id"]),
+                "game_id": f"{season}-{g['id']}",
+                "liiga_id": g["id"],
                 "stage": stage,
                 "played_at": g.get("start"),
                 "home_team": g["homeTeam"]["teamName"],
@@ -60,7 +65,7 @@ def season_games(start_year: int, stages=("regular", "playoffs")) -> list[dict]:
 
 def load_game(meta: dict, start_year: int) -> Game | None:
     season = meta.get("season", start_year + 1)
-    url = f"{API}/games/{season}/{meta['game_id']}"
+    url = f"{API}/games/{season}/{meta['liiga_id']}"
     payload = get_json(url, tolerate_404=True)
     if not payload or "game" not in payload:
         log.warning("LIIGA %s: no game detail", meta["game_id"])

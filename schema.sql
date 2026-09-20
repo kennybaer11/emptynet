@@ -8,7 +8,9 @@ CREATE SCHEMA IF NOT EXISTS emptynet;
 
 CREATE TABLE IF NOT EXISTS emptynet.game (
   league        TEXT    NOT NULL,   -- NHL, LIIGA, DEL, EIHL, U20SM
-  game_id       TEXT    NOT NULL,   -- the league's own id, kept as text
+  game_id       TEXT    NOT NULL,   -- the league's own id, kept as text;
+                                    -- a league that renumbers from 1 each
+                                    -- season must qualify it in its source
   season        TEXT    NOT NULL,   -- '2024-25'
   stage         TEXT,               -- regular, playoffs, cup, ...
   played_at     TIMESTAMPTZ,

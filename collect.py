@@ -69,6 +69,14 @@ def collect_season(conn, league: str, start_year: int, stages, dry_run: bool,
             rate = i / max(time.monotonic() - started, 1e-9)
             log.info("%s %s: %d/%d games (%.1f/s), %d trailing pulls",
                      league, label, i, len(todo), rate, counts["trailing"])
+
+    if conn is not None and not dry_run:
+        stored = len(db.known_game_ids(conn, league, label))
+        if stored < counts["games"]:
+            # A league that numbers its games from 1 every season will quietly
+            # overwrite the previous one unless the source qualifies the id.
+            log.error("%s %s: collected %d games but only %d are stored - "
+                      "game ids are colliding", league, label, counts["games"], stored)
     return counts
 
 
