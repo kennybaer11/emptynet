@@ -170,16 +170,36 @@ def load_game(meta: dict, start_year: int) -> Game | None:
         source_url=SHEET.format(id=meta["game_id"]),
     )
 
-    times = _goal_times(text)
-    goals = [(t, "home") for t in times[0]] + [(t, "away") for t in times[1]]
+    minutes, conceded = _goalie_table(text)
+    scored = _reconcile(_goal_times(text), conceded, _game_length(minutes))
+    goals = [(t, "home") for t in scored[0]] + [(t, "away") for t in scored[1]]
     for idx, (t, side) in enumerate(sorted(goals), start=1):
         game.goals.append(Goal(idx=idx, team_side=side, game_time=t))
 
-    game.home_goals = len(times[0])
-    game.away_goals = len(times[1])
-    game.windows = _windows(text)
+    game.home_goals = len(scored[0])
+    game.away_goals = len(scored[1])
+    game.windows = _windows(text, minutes)
     game.finished_in = "OT" if any(t > 3600 for t, _ in goals) else "REG"
     return game
+
+
+def _reconcile(times: tuple[list[int], list[int]], conceded: dict[str, int],
+               length: int) -> tuple[list[int], list[int]]:
+    """Drop the shootout winner, which the Goals table lists as a goal.
+
+    Two things make a goal one too many for the goalie table to account for: a
+    shootout winner, credited in the score but conceded by nobody, and a goal
+    into an empty net, which no goalie was there to concede. Only the first
+    should go, and the clock separates them - a shootout winner is logged at
+    the horn, an empty-net goal before it.
+    """
+    out = []
+    for side, mine in (("home", times[0]), ("away", times[1])):
+        expected = conceded.get("away" if side == "home" else "home")
+        if expected is not None and mine and len(mine) == expected + 1                 and mine[-1] >= length:
+            mine = mine[:-1]
+        out.append(mine)
+    return out[0], out[1]
 
 
 def _seconds(token: str) -> int:
@@ -202,8 +222,7 @@ def _goal_times(text: str) -> tuple[list[int], list[int]]:
     return out[0], out[1]
 
 
-def _windows(text: str) -> list[EmptyNetWindow]:
-    minutes = _goalie_minutes(text)
+def _windows(text: str, minutes: dict[str, int]) -> list[EmptyNetWindow]:
     if not minutes:
         return []
     rows = _gk_rows(text)
@@ -215,14 +234,14 @@ def _windows(text: str) -> list[EmptyNetWindow]:
         if empty <= 0:
             continue
         back = _returned_at(rows, side, length)
-        end = back if (back is not None and length - back <= RETURN_WINDOW
-                       and empty <= back) else length
+        end = back if (back is not None and empty <= back
+                       and _is_return(back, length)) else length
         out.append(EmptyNetWindow(side, end - empty, end))
     return out
 
 
-def _goalie_minutes(text: str) -> dict[str, int]:
-    """Minutes played per side, summed over that side's netminders.
+def _goalie_table(text: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Minutes played and goals conceded, per side, over that side's netminders.
 
     The table runs No. A, Min, GA, No. B, Min, GA across, six cells to a row.
     Blank cells are non-breaking spaces and are kept, because dropping them
@@ -230,19 +249,23 @@ def _goalie_minutes(text: str) -> dict[str, int]:
     """
     m = re.search(r"\|No\. A\|(.*?)\|Local start time", text, re.S)
     if not m:
-        return {}
+        return {}, {}
     cells = [c.strip(SPACE) for c in m.group(1).split("|")]
     cells = [c for c in cells if c and c not in ("Min", "GA", "No. B")]
 
-    totals = {"home": 0, "away": 0}
+    minutes = {"home": 0, "away": 0}
+    conceded = {"home": 0, "away": 0}
     seen = False
     for i in range(0, len(cells) - 5, 6):
         row = cells[i:i + 6]
-        for side, minute in (("home", row[1]), ("away", row[4])):
+        for side, minute, against in (("home", row[1], row[2]),
+                                      ("away", row[4], row[5])):
             if re.fullmatch(r"\d{1,3}:\d{2}", minute):
-                totals[side] += _seconds(minute)
+                minutes[side] += _seconds(minute)
                 seen = True
-    return totals if seen else {}
+            if against.isdigit():
+                conceded[side] += int(against)
+    return (minutes, conceded) if seen else ({}, {})
 
 
 def _gk_rows(text: str) -> list[tuple[int, str, str]]:
@@ -269,7 +292,18 @@ def _game_length(minutes: dict[str, int]) -> int:
     after a shootout it reads past the end of overtime, which would make both
     nets look unattended for the length of the shootout.
     """
-    return max(3600, *minutes.values())
+    return max([3600, *minutes.values()])
+
+
+def _is_return(when: int, length: int) -> bool:
+    """A goalie back in the net near a horn is a return; earlier is a change.
+
+    Both horns count: a team that ties the game with the net empty gets its
+    goalie back for an overtime that ends minutes later, and measuring only
+    against the end of the game would throw that pull away.
+    """
+    return (length - when <= RETURN_WINDOW
+            or (when <= 3600 and 3600 - when <= RETURN_WINDOW))
 
 
 def _returned_at(rows: list[tuple[int, str, str]], side: str, length: int) -> int | None:

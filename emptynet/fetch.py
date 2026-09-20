@@ -3,13 +3,17 @@
 A season of play-by-play is a thousand requests you do not want to make twice,
 so every response is written to disk under the cache directory and re-read on
 the next run. Delete the cache (or pass refresh=True) to go back to the wire.
+
+Misses are cached too. Sheet ids come in blocks with unused stretches of
+several hundred between them, and a gap the collector forgets is a gap it pays
+for again on every run.
 """
 
 import hashlib
 import json
-import re
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -25,9 +29,17 @@ HEADERS = {
     "Accept-Language": "en,fi;q=0.8,de;q=0.8",
 }
 
-# Politeness delay between live requests, per host.
+# Politeness delay between live requests, per host. A few hundred game pages
+# in a row is enough for some of these sites to start refusing, so the ones
+# that have done so get a wider gap.
 DELAY = 0.4
-_last_call = {}
+DELAY_BY_HOST = {"www.penny-del.org": 1.2}
+
+# A refusal in the middle of a season should cost a wait, not the run.
+BACKOFF = (3, 10, 30, 90)
+RETRY_STATUS = {408, 425, 429, 500, 502, 503, 504}
+
+_last_call: dict[str, float] = {}
 
 
 def _path(url: str, suffix: str) -> Path:
@@ -39,6 +51,12 @@ def _path(url: str, suffix: str) -> Path:
 def _missing(url: str) -> Path:
     """Marker for a URL the server has already told us does not exist."""
     return _path(url, ".missing")
+
+
+def _mark_missing(url: str) -> None:
+    path = _missing(url)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
 
 
 def _fix_encoding(response) -> None:
@@ -56,10 +74,40 @@ def _fix_encoding(response) -> None:
 
 def _throttle(url: str) -> None:
     host = url.split("/")[2]
+    wanted = DELAY_BY_HOST.get(host, DELAY)
     gap = time.monotonic() - _last_call.get(host, 0.0)
-    if gap < DELAY:
-        time.sleep(DELAY - gap)
+    if gap < wanted:
+        time.sleep(wanted - gap)
     _last_call[host] = time.monotonic()
+
+
+def _get(url: str, accept: str | None, timeout: int, tolerate_404: bool):
+    """A single response, retried through a refusal. None means 404."""
+    headers = {**HEADERS, **({"Accept": accept} if accept else {})}
+    last = None
+
+    for attempt in range(len(BACKOFF) + 1):
+        _throttle(url)
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last = exc
+        else:
+            if r.status_code == 404 and tolerate_404:
+                _mark_missing(url)
+                return None
+            if r.status_code not in RETRY_STATUS:
+                r.raise_for_status()
+                _fix_encoding(r)
+                return r
+            last = requests.HTTPError(f"{r.status_code} for {url}", response=r)
+
+        if attempt < len(BACKOFF):
+            wait = BACKOFF[attempt]
+            log.warning("%s - waiting %ds then retrying: %s", last, wait, url)
+            time.sleep(wait)
+
+    raise last
 
 
 def get_text(url: str, refresh: bool = False, tolerate_404: bool = False) -> str | None:
@@ -70,14 +118,9 @@ def get_text(url: str, refresh: bool = False, tolerate_404: bool = False) -> str
     if tolerate_404 and _missing(url).exists() and not refresh:
         return None
 
-    _throttle(url)
-    log.debug("GET %s", url)
-    r = requests.get(url, headers=HEADERS, timeout=60)
-    if r.status_code == 404 and tolerate_404:
-        _mark_missing(url)
+    r = _get(url, None, 60, tolerate_404)
+    if r is None:
         return None
-    r.raise_for_status()
-    _fix_encoding(r)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(r.text, encoding="utf-8")
     return r.text
@@ -91,23 +134,19 @@ def get_json(url: str, refresh: bool = False, tolerate_404: bool = False):
             return json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             log.warning("corrupt cache entry, refetching: %s", url)
-
     if tolerate_404 and _missing(url).exists() and not refresh:
         return None
 
-    _throttle(url)
-    log.debug("GET %s", url)
-    r = requests.get(url, headers={**HEADERS, "Accept": "application/json"}, timeout=60)
-    if r.status_code == 404 and tolerate_404:
-        _mark_missing(url)
+    r = _get(url, "application/json", 60, tolerate_404)
+    if r is None:
         return None
-    r.raise_for_status()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(r.text, encoding="utf-8")
     return r.json()
 
 
-def get_distilled(url, distill, refresh: bool = False, tolerate_404: bool = False) -> str | None:
+def get_distilled(url: str, distill, refresh: bool = False,
+                  tolerate_404: bool = False) -> str | None:
     """Fetch, reduce to what we actually keep, and cache only the reduction.
 
     Some game sheets are two megabytes of absolutely-positioned markup around
@@ -120,27 +159,10 @@ def get_distilled(url, distill, refresh: bool = False, tolerate_404: bool = Fals
     if tolerate_404 and _missing(url).exists() and not refresh:
         return None
 
-    _throttle(url)
-    log.debug("GET %s", url)
-    r = requests.get(url, headers=HEADERS, timeout=90)
-    if r.status_code == 404 and tolerate_404:
-        _mark_missing(url)
+    r = _get(url, None, 90, tolerate_404)
+    if r is None:
         return None
-    r.raise_for_status()
-    _fix_encoding(r)
     text = distill(r.text)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return text
-
-
-def _mark_missing(url: str) -> None:
-    """Remember a 404.
-
-    Sheet ids come in blocks with unused stretches of several hundred between
-    them, and a gap the collector forgets is a gap it pays for again on every
-    run. The marker is empty; its existence is the whole message.
-    """
-    path = _missing(url)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch()
