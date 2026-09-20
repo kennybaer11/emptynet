@@ -64,6 +64,25 @@ rates.
 SELECT * FROM emptynet.v_pull_rates;
 ```
 
+## What three seasons say
+
+2023-24 to 2025-26, 9,395 games, 7,551 tactical pulls. `left` is how much
+regulation was left when the goalie went, `empty` how long the net stayed
+that way.
+
+| League | Pulls | left | empty | Scored | Conceded | Nothing |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| NHL | 3,697 | 2:03 | 60 s | 12.6% | 36.4% | 51.0% |
+| Liiga | 1,297 | 2:02 | 67 s | 14.3% | 35.2% | 50.5% |
+| U20 SM-sarja | 1,080 | 2:07 | 45 s | 15.6% | 37.3% | 47.1% |
+| DEL | 1,003 | 2:02 | 49 s | 13.1% | 33.3% | 53.6% |
+| EIHL | 474 | 1:46 | 76 s | 11.2% | 41.1% | 47.7% |
+
+Five leagues, five unrelated feeds, five parsers written separately - and they
+agree to within a few points. That agreement is the best evidence available
+that the parsing is right, which is why the table is worth more than any one
+league's number.
+
 ## Things to know before trusting a number
 
 * **Both teams' pulls are counted separately.** A game where a team pulls,
@@ -80,3 +99,13 @@ SELECT * FROM emptynet.v_pull_rates;
 * **A goal at the same second as the pull counts as before it.** That goal is
   usually the reason for the pull, so it belongs to the score the coach was
   looking at.
+* **EIHL windows run longer than the rest, and some of that is the method.**
+  Its sheet does not record the pull, so a window is reconstructed from
+  minutes played and the goalie's return. A game with two separate pulls comes
+  back as one long window, which also pushes its conceded rate up. The other
+  four leagues state the pull outright and need no such reconstruction.
+* **A league that renumbers its games from 1 each season must say so.** Liiga
+  does, and storing its games under the league's own id silently overwrote
+  each season with the next. Its ids are now qualified with the season; the
+  collector checks every season's stored count against what it collected and
+  complains if they differ.
