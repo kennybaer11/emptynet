@@ -9,9 +9,9 @@ against them, or nothing at all.
 
 ## Leagues and where the answer comes from
 
-Every league states it differently, and the difference matters: two of these
-feeds time the pull to the second, one has to be read out of a form, and one
-is not solved yet.
+Every league states it differently, and the difference matters. Four of the
+five time the pull to the second; the NHL times it to the play, which for a
+pull taken at a whistle is the same thing.
 
 | League | Source | Pull timing |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ is not solved yet.
 | **Liiga** | `liiga.fi/api/v2` game detail | `goalKeeperEvents` with `emptyNet: 1`, `beginTime` and `endTime` already in seconds. Exact. |
 | **DEL** | `penny-del.org` game page | The event list carries `Torhüter aus dem Tor` and `Torhüter ins Tor` with the clock. Exact. |
 | **EIHL** | official game sheet on `eihlhq.co.uk` | The `Time / GKA / GKB` table at the foot of the sheet: a row where a column reads `- -` is a pull. Exact. |
-| **U20 SM-sarja** | not collecting yet | See `emptynet/sources/u20sm.py`. The league is not on the Liiga API; its results sit in the Finnish association's GameCentre, and whether that records goalie in and out times is still unverified. |
+| **U20 SM-sarja** | `tulospalvelu.leijonat.fi` game report | `GK_out` and `GK_in` entries in `GameLogsUpdate`, with `GameTime` in seconds, alongside `Timeout`. Exact. |
 
 A "season" is named by the year it starts in: `2024` means 2024-25.
 
