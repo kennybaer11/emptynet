@@ -36,6 +36,11 @@ def _path(url: str, suffix: str) -> Path:
     return CACHE_DIR / host / f"{digest}{suffix}"
 
 
+def _missing(url: str) -> Path:
+    """Marker for a URL the server has already told us does not exist."""
+    return _path(url, ".missing")
+
+
 def _fix_encoding(response) -> None:
     """Believe the document, not requests' fallback.
 
@@ -62,11 +67,14 @@ def get_text(url: str, refresh: bool = False, tolerate_404: bool = False) -> str
     path = _path(url, ".txt")
     if path.exists() and not refresh:
         return path.read_text(encoding="utf-8")
+    if tolerate_404 and _missing(url).exists() and not refresh:
+        return None
 
     _throttle(url)
     log.debug("GET %s", url)
     r = requests.get(url, headers=HEADERS, timeout=60)
     if r.status_code == 404 and tolerate_404:
+        _mark_missing(url)
         return None
     r.raise_for_status()
     _fix_encoding(r)
@@ -84,10 +92,14 @@ def get_json(url: str, refresh: bool = False, tolerate_404: bool = False):
         except json.JSONDecodeError:
             log.warning("corrupt cache entry, refetching: %s", url)
 
+    if tolerate_404 and _missing(url).exists() and not refresh:
+        return None
+
     _throttle(url)
     log.debug("GET %s", url)
     r = requests.get(url, headers={**HEADERS, "Accept": "application/json"}, timeout=60)
     if r.status_code == 404 and tolerate_404:
+        _mark_missing(url)
         return None
     r.raise_for_status()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,11 +117,14 @@ def get_distilled(url, distill, refresh: bool = False, tolerate_404: bool = Fals
     path = _path(url, ".distilled.txt")
     if path.exists() and not refresh:
         return path.read_text(encoding="utf-8")
+    if tolerate_404 and _missing(url).exists() and not refresh:
+        return None
 
     _throttle(url)
     log.debug("GET %s", url)
     r = requests.get(url, headers=HEADERS, timeout=90)
     if r.status_code == 404 and tolerate_404:
+        _mark_missing(url)
         return None
     r.raise_for_status()
     _fix_encoding(r)
@@ -117,3 +132,15 @@ def get_distilled(url, distill, refresh: bool = False, tolerate_404: bool = Fals
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return text
+
+
+def _mark_missing(url: str) -> None:
+    """Remember a 404.
+
+    Sheet ids come in blocks with unused stretches of several hundred between
+    them, and a gap the collector forgets is a gap it pays for again on every
+    run. The marker is empty; its existence is the whole message.
+    """
+    path = _missing(url)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
