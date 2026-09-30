@@ -19,6 +19,10 @@ timeline gives when the goalie came back. Together they place the window at
 fixes the window just as well. Two separate pulls in one game would merge
 into one - rare enough to accept, and visible as an unusually long window.
 
+A sheet exists from the moment a fixture is scheduled, months before anyone
+plays it, carrying neither goals nor goalie minutes - so an empty sheet is
+skipped rather than stored as a goalless game.
+
 Sheet ids run in date order across seasons, with unused blocks of a few
 hundred in between, so a season's id range is found by bisecting over the ids
 that exist. Each sheet is ~1.8 MB of positioned markup around ~45 KB of text,
@@ -30,7 +34,7 @@ import re
 import string
 from datetime import date
 
-from ..fetch import get_distilled
+from ..fetch import forget_missing, get_distilled
 from ..model import EmptyNetWindow, Game, Goal
 
 log = logging.getLogger(__name__)
@@ -139,18 +143,29 @@ def season_games(start_year: int, stages=("regular", "playoffs", "cup"),
     log.info("EIHL %s: sheet ids %d..%d", season_label(start_year), first, last)
 
     games = []
+    highest = first - 1
     for sheet_id in range(first, last):
         text = _sheet(sheet_id)
         if not text:
+            if sheet_id - highest > HOLE_SEARCH:
+                break                  # past the end of what has been played
             continue
         head = _header(text)
         if not head:
             continue
+        highest = sheet_id
         stage = _stage(head["competition"])
         if stage not in stages:
             continue
         games.append({"game_id": str(sheet_id), "stage": stage, **head})
-    log.info("EIHL %s: %d game sheets", season_label(start_year), len(games))
+
+    # Misses above the last sheet that exists are games still to be played,
+    # and a remembered miss would keep them out of every later run.
+    for sheet_id in range(highest + 1, last):
+        forget_missing(SHEET.format(id=sheet_id))
+
+    log.info("EIHL %s: %d game sheets, up to id %d",
+             season_label(start_year), len(games), highest)
     return games
 
 
@@ -172,6 +187,8 @@ def load_game(meta: dict, start_year: int) -> Game | None:
 
     minutes, conceded = _goalie_table(text)
     scored = _reconcile(_goal_times(text), conceded, _game_length(minutes))
+    if not minutes and not (scored[0] or scored[1]):
+        return None          # a sheet printed for a fixture nobody has played yet
     goals = [(t, "home") for t in scored[0]] + [(t, "away") for t in scored[1]]
     for idx, (t, side) in enumerate(sorted(goals), start=1):
         game.goals.append(Goal(idx=idx, team_side=side, game_time=t))

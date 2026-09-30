@@ -61,17 +61,35 @@ def season_games(start_year: int, stages=("regular", "playoffs")) -> list[dict]:
             continue
         for month in MONTHS:
             url = f"{SITE}/statistik/{_season_slug(start_year)}/{slug}/spielplan/monat/{month}"
-            page = get_text(url, tolerate_404=True)
+            # A stage that has not been played yet answers 403, not 404.
+            page = get_text(url, tolerate_404=True, absent=(403, 404))
             if not page:
                 continue
             for href in re.findall(r"/statistik/spieldetails/[A-Za-z0-9_\-]+", page):
                 game_id = href.rsplit("_", 1)[-1]
                 if not game_id.isdigit() or game_id in seen:
                     continue
+                if not _in_season(href, start_year):
+                    continue      # the site-wide scoreboard strip, not this month
                 seen.add(game_id)
                 games.append({"game_id": game_id, "stage": stage, "path": href})
     log.info("DEL %s: %d games on the schedule", season_label(start_year), len(games))
     return games
+
+
+def _in_season(path: str, start_year: int) -> bool:
+    """Is this link's game inside the season we are scraping?
+
+    Every page carries a scoreboard strip of the day's games across the top,
+    whatever month or season the page itself is about. The date sits in the
+    link, so it can say which links belong to the schedule below it.
+    """
+    m = re.search(r"/spieldetails/(\d{2})(\d{2})(\d{4})_", path)
+    if not m:
+        return False
+    day, month, year = (int(x) for x in m.groups())
+    season = year if month >= 8 else year - 1
+    return season == start_year
 
 
 def load_game(meta: dict, start_year: int) -> Game | None:

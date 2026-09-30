@@ -64,19 +64,44 @@ rates.
 SELECT * FROM emptynet.v_pull_rates;
 ```
 
-## What three seasons say
+## How likely is a pull in the first place
 
-2023-24 to 2025-26, 9,395 games, 7,551 tactical pulls. `left` is how much
-regulation was left when the goalie went, `empty` how long the net stayed
-that way.
+The pull table holds the pulls that happened, not the situations where a team
+could have pulled and did not. `probability.py` rebuilds that denominator from
+the goal times - at a given moment every team is behind by some number of
+goals, and either has its goalie in the net or does not.
+
+```bash
+python probability.py --league LIIGA --deficit 3
+```
+
+Liiga, teams trailing by exactly three goals:
+
+| Left | Teams | Net empty now | Pull while still 3 down | Pull by the horn |
+| ---: | ---: | ---: | ---: | ---: |
+| 5:00 | 195 | 0.0% | 35.9% | 47.2% |
+| 3:00 | 196 | 16.8% | 24.0% | 42.9% |
+| 2:00 | 225 | 22.2% | 11.1% | 33.8% |
+| 1:00 | 265 | 19.2% | 2.3% | 20.4% |
+
+The last two columns are not the same question. A team three down at five
+minutes often scores twice before it pulls, so "by the horn" counts pulls
+taken at a one-goal deficit. Only the middle column answers what a team does
+*while* three behind.
+
+## What the seasons say
+
+2023-24 to 2026-27 so far: 9,580 games, 7,682 tactical pulls. `left` is how
+much regulation was left when the goalie went, `empty` how long the net
+stayed that way.
 
 | League | Pulls | left | empty | Scored | Conceded | Nothing |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| NHL | 3,697 | 2:03 | 60 s | 12.6% | 36.4% | 51.0% |
-| Liiga | 1,297 | 2:02 | 67 s | 14.3% | 35.2% | 50.5% |
-| U20 SM-sarja | 1,080 | 2:07 | 45 s | 15.6% | 37.3% | 47.1% |
-| DEL | 1,003 | 2:02 | 49 s | 13.1% | 33.3% | 53.6% |
-| EIHL | 474 | 1:46 | 76 s | 11.2% | 41.1% | 47.7% |
+| NHL | 3,701 | 2:03 | 60 s | 12.6% | 36.4% | 51.0% |
+| Liiga | 1,350 | 2:02 | 68 s | 14.1% | 35.0% | 50.9% |
+| U20 SM-sarja | 1,120 | 2:07 | 45 s | 15.6% | 37.1% | 47.3% |
+| DEL | 1,024 | 2:03 | 49 s | 13.2% | 33.5% | 53.3% |
+| EIHL | 487 | 1:47 | 76 s | 10.9% | 41.3% | 47.8% |
 
 Five leagues, five unrelated feeds, five parsers written separately - and they
 agree to within a few points. That agreement is the best evidence available
