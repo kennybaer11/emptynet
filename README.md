@@ -73,6 +73,7 @@ goals, and either has its goalie in the net or does not.
 
 ```bash
 python probability.py --league LIIGA --deficit 3
+python probability.py --league LIIGA --team SaiPa --deficit 3
 ```
 
 Liiga, teams trailing by exactly three goals:
@@ -88,6 +89,12 @@ The last two columns are not the same question. A team three down at five
 minutes often scores twice before it pulls, so "by the horn" counts pulls
 taken at a one-goal deficit. Only the middle column answers what a team does
 *while* three behind.
+
+`--team` narrows it to one club, and the 95% range is why that is printed
+rather than the bare percentage: a single club's three-goal deficits number in
+the dozens. SaiPa's 33% over fifteen such games spans 15-58%, which cannot be
+told apart from the league's 36%, from zero pulls more than the league, or
+from twice as many.
 
 ## What the seasons say
 
