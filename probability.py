@@ -76,10 +76,12 @@ def deficit_at(game_goals, side: str, t: int) -> int:
     return theirs - mine
 
 
-def tally(games, goals, pulls, team: str | None = None):
+def tally(games, goals, pulls, team: str | None = None, sides=None):
     """For each mark and deficit: how many teams were there, and what they did.
 
     With `team` given, only that club's own side of each game is counted.
+    With `sides` given - a mapping of game id to the sides to count - only
+    those are, which is how a question about one goaltender is asked.
     """
     counts = defaultdict(lambda: {"teams": 0, "already": 0, "by_horn": 0,
                                   "still_behind": 0})
@@ -91,6 +93,8 @@ def tally(games, goals, pulls, team: str | None = None):
 
         for side in ("home", "away"):
             if team and game[side].casefold() != team.casefold():
+                continue
+            if sides is not None and side not in sides.get(game_id, ()):
                 continue
             mine = [(s, a, b) for s, a, b in game_pulls if s == side]
             for mark in MARKS:
